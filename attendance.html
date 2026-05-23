@@ -204,7 +204,8 @@
               <select id="new-subject-cat" style="width:120px">
                 <option value="普通">普通</option>
                 <option value="理数">理数</option>
-                <option value="その他">その他</option>
+                <option value="選択">選択</option>
+              <option value="その他">その他</option>
               </select>
               <button class="btn btn-primary btn-sm" onclick="addCustomSubject()">追加</button>
             </div>
@@ -405,6 +406,7 @@ const DEFAULT_SUBJECTS = [
   {name:'情報I',cat:'普通'},{name:'情報II',cat:'普通'},
   {name:'家庭基礎',cat:'普通'},{name:'家庭総合',cat:'普通'},
   {name:'総合的な探究の時間',cat:'普通'},{name:'ホームルーム',cat:'その他'},
+  {name:'地理総合／政治・経済',cat:'選択'},{name:'理数物理／理数生物',cat:'選択'},
   {name:'理数探究基礎',cat:'理数'},{name:'理数探究',cat:'理数'},
   {name:'理数数学I',cat:'理数'},{name:'理数数学II',cat:'理数'},
   {name:'理数数学特論',cat:'理数'},{name:'理数物理',cat:'理数'},
@@ -547,7 +549,7 @@ function renderStudentList() {
 
 // ======== SUBJECTS ========
 function renderSubjectList() {
-  const cats = ['普通','理数','その他'];
+  const cats = ['普通','理数','選択','その他'];
   let html = '';
   cats.forEach(cat => {
     const subs = state.subjects.filter(s => s.cat === cat);
@@ -555,7 +557,7 @@ function renderSubjectList() {
     html += `<div class="section-title">${cat}教科</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">`;
     subs.forEach((s, idx) => {
       const globalIdx = state.subjects.indexOf(s);
-      html += `<span class="pill pill-${cat==='普通'?'accent':cat==='理数'?'info':'gray'}" style="cursor:pointer" title="クリックで削除" onclick="removeSubject(${globalIdx})">${s.name} ✕</span>`;
+      html += `<span class="pill pill-${cat==='普通'?'accent':cat==='理数'?'info':cat==='選択'?'warn':'gray'}" style="cursor:pointer" title="クリックで削除" onclick="removeSubject(${globalIdx})">${s.name} ✕</span>`;
     });
     html += '</div>';
   });
@@ -643,7 +645,7 @@ function closeSubjectModal() {
 function filterSubjects() {
   const q = document.getElementById('subject-search').value.trim().toLowerCase();
   const filtered = state.subjects.filter(s => !q || s.name.toLowerCase().includes(q) || s.cat.includes(q));
-  const cats = ['普通','理数','その他'];
+  const cats = ['普通','理数','選択','その他'];
   let html = '';
   cats.forEach(cat => {
     const subs = filtered.filter(s => s.cat === cat);
