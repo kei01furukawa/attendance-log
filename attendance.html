@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -426,7 +427,7 @@ let state = {
 };
 
 // ======== FIREBASE ========
-function saveFirebaseConfig() {
+async function saveFirebaseConfig() {
   const raw = document.getElementById('fb-config-input').value.trim();
   try {
     const cfg = JSON.parse(raw);
@@ -434,10 +435,11 @@ function saveFirebaseConfig() {
     state.firebase = firebase.initializeApp(cfg, 'main_' + Date.now());
     state.db = state.firebase.firestore();
     localStorage.setItem('fbConfig', raw);
+    document.getElementById('fb-status').textContent = '⏳ データ読み込み中...';
+    document.getElementById('fb-status').style.color = 'var(--warn)';
+    await loadFromFirestore();
     document.getElementById('fb-status').textContent = '✅ 接続済み: ' + (cfg.projectId || '');
     document.getElementById('fb-status').style.color = 'var(--accent)';
-    loadFromFirestore();
-    toast('Firebase接続成功');
   } catch(e) {
     document.getElementById('fb-status').textContent = '❌ エラー: ' + e.message;
     document.getElementById('fb-status').style.color = 'var(--danger)';
@@ -447,18 +449,36 @@ function saveFirebaseConfig() {
 async function loadFromFirestore() {
   if (!state.db) return;
   try {
-    const [studentsSnap, dcSnap, attSnap] = await Promise.all([
+    const [studentsSnap, dcSnap, attSnap, ttSnap, subSnap] = await Promise.all([
       state.db.collection('students').orderBy('num').get(),
       state.db.collection('dayChanges').get(),
       state.db.collection('attendance').get(),
+      state.db.collection('settings').doc('timetable').get(),
+      state.db.collection('settings').doc('subjects').get(),
     ]);
     state.students = studentsSnap.docs.map(d => d.data());
     state.dayChanges = {};
     dcSnap.docs.forEach(d => state.dayChanges[d.id] = d.data().changes || []);
     state.attendance = {};
     attSnap.docs.forEach(d => state.attendance[d.id] = d.data());
+
+    if (ttSnap.exists) {
+      const ttData = ttSnap.data();
+      if (ttData.timetable) state.timetable = ttData.timetable;
+      if (ttData.dayMaxPeriods) state.dayMaxPeriods = ttData.dayMaxPeriods;
+      localStorage.setItem('timetable', JSON.stringify(state.timetable));
+      localStorage.setItem('dayMaxPeriods', JSON.stringify(state.dayMaxPeriods));
+    }
+    if (subSnap.exists && subSnap.data().subjects) {
+      state.subjects = subSnap.data().subjects;
+      localStorage.setItem('subjects', JSON.stringify(state.subjects));
+    }
+
     renderStudentList();
+    renderSubjectList();
+    renderTimetable();
     renderDayChangeList();
+    populateSwapSubjects();
     toast('Firestoreからデータを読み込みました');
   } catch(e) { console.error(e); }
 }
@@ -549,6 +569,7 @@ function addCustomSubject() {
   if (state.subjects.find(s => s.name === name)) { toast('既に存在します'); return; }
   state.subjects.push({name, cat});
   localStorage.setItem('subjects', JSON.stringify(state.subjects));
+  if (state.db) saveToFirestore('settings', 'subjects', {subjects: state.subjects});
   document.getElementById('new-subject-name').value = '';
   renderSubjectList();
   populateSwapSubjects();
@@ -558,6 +579,7 @@ function removeSubject(idx) {
   if (!confirm(`「${state.subjects[idx].name}」を削除しますか？`)) return;
   state.subjects.splice(idx, 1);
   localStorage.setItem('subjects', JSON.stringify(state.subjects));
+  if (state.db) saveToFirestore('settings', 'subjects', {subjects: state.subjects});
   renderSubjectList();
 }
 
@@ -601,6 +623,7 @@ function renderTimetable() {
 function setDayMax(dayIdx, val) {
   state.dayMaxPeriods[dayIdx] = parseInt(val);
   localStorage.setItem('dayMaxPeriods', JSON.stringify(state.dayMaxPeriods));
+  if (state.db) saveToFirestore('settings', 'timetable', {timetable: state.timetable, dayMaxPeriods: state.dayMaxPeriods});
   renderTimetable();
 }
 
@@ -663,6 +686,7 @@ function saveTimetable() {
   localStorage.setItem('dayMaxPeriods', JSON.stringify(state.dayMaxPeriods));
   if (state.db) {
     saveToFirestore('settings', 'timetable', {timetable: state.timetable, dayMaxPeriods: state.dayMaxPeriods});
+    saveToFirestore('settings', 'subjects', {subjects: state.subjects});
   }
   toast('時間割を保存しました');
 }
@@ -961,7 +985,7 @@ function toast(msg) {
 }
 
 // ======== INIT ========
-function init() {
+async function init() {
   const year = new Date().getFullYear();
   const month = new Date().getMonth() + 1;
   document.getElementById('year-badge').textContent = (month >= 4 ? year : year - 1) + '年度';
@@ -973,17 +997,18 @@ function init() {
   document.getElementById('sum-from').value = today.slice(0,7) + '-01';
   document.getElementById('sum-to').value = today;
 
-  // Restore Firebase
+  // Restore Firebase — await so Firestore data loads before rendering
   const savedCfg = localStorage.getItem('fbConfig');
   if (savedCfg) {
     document.getElementById('fb-config-input').value = savedCfg;
-    saveFirebaseConfig();
+    await saveFirebaseConfig();
+  } else {
+    // No Firebase config: render from localStorage only
+    renderSubjectList();
+    renderTimetable();
+    populateSwapSubjects();
+    updateDCForm();
   }
-
-  renderSubjectList();
-  renderTimetable();
-  populateSwapSubjects();
-  updateDCForm();
 }
 
 document.addEventListener('DOMContentLoaded', init);
