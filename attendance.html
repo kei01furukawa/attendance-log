@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>欠課管理システム</title>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f4f0;
+    --surface: #ffffff;
+    --surface2: #f0efe9;
+    --border: #dddbd3;
+    --border2: #c8c6bc;
+    --text: #1a1917;
+    --text2: #6b6960;
+    --text3: #9b9a92;
+    --accent: #0f6e56;
+    --accent-light: #e1f5ee;
+    --accent-mid: #1d9e75;
+    --warn: #ba7517;
+    --warn-light: #faeeda;
+    --danger: #993c1d;
+    --danger-light: #faece7;
+    --info: #185fa5;
+    --info-light: #e6f1fb;
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Hiragino Kaku Gothic ProN', 'メイリオ', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; }
+  h1 { font-size: 20px; font-weight: 600; }
+  h2 { font-size: 16px; font-weight: 600; }
+  h3 { font-size: 14px; font-weight: 600; }
+
+  /* Layout */
+  #app { display: flex; flex-direction: column; min-height: 100vh; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; gap: 20px; height: 52px; position: sticky; top: 0; z-index: 100; }
+  header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: -0.3px; }
+  .year-badge { font-size: 12px; background: var(--accent-light); color: var(--accent); padding: 2px 10px; border-radius: 20px; font-weight: 600; }
+
+  nav { display: flex; gap: 2px; margin-left: auto; }
+  nav button { background: none; border: none; padding: 6px 14px; border-radius: var(--radius); font-size: 13px; font-weight: 500; color: var(--text2); cursor: pointer; transition: all .15s; }
+  nav button:hover { background: var(--surface2); color: var(--text); }
+  nav button.active { background: var(--accent-light); color: var(--accent); }
+
+  main { flex: 1; padding: 24px; max-width: 1100px; margin: 0 auto; width: 100%; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Firebase config modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .modal { background: var(--surface); border-radius: var(--radius-lg); padding: 28px; width: 480px; max-width: 95vw; }
+  .modal h2 { margin-bottom: 16px; }
+  .modal p { font-size: 13px; color: var(--text2); margin-bottom: 16px; }
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 4px; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 13px; background: var(--surface); color: var(--text); outline: none;
+    transition: border-color .15s;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent-mid); }
+  .form-group textarea { resize: vertical; min-height: 60px; font-family: monospace; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; }
+  .btn:hover { background: var(--surface2); border-color: var(--border2); }
+  .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent-mid); }
+  .btn-danger { background: var(--danger-light); color: var(--danger); border-color: var(--danger); }
+  .btn-warn { background: var(--warn-light); color: var(--warn); border-color: var(--warn); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+
+  /* Cards */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 16px; }
+  .card-title { font-size: 15px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+
+  /* Grid */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  /* Tables */
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { padding: 8px 10px; text-align: left; font-weight: 600; color: var(--text2); border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--surface2); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  /* Timetable grid */
+  .tt-grid { display: grid; gap: 2px; }
+  .tt-cell { padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; min-height: 48px; cursor: pointer; font-size: 12px; transition: all .1s; position: relative; }
+  .tt-cell:hover { border-color: var(--accent-mid); }
+  .tt-cell.filled { background: var(--accent-light); border-color: var(--accent-mid); }
+  .tt-cell.filled .subject-name { color: var(--accent); font-weight: 600; }
+  .tt-header { padding: 6px 8px; text-align: center; font-weight: 700; font-size: 12px; color: var(--text2); }
+  .tt-period { padding: 6px 8px; text-align: center; font-weight: 600; font-size: 12px; color: var(--text2); background: var(--surface2); border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+  .tt-disabled { background: var(--bg); opacity: .5; cursor: default; }
+
+  /* Subject pills */
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .pill-accent { background: var(--accent-light); color: var(--accent); }
+  .pill-warn { background: var(--warn-light); color: var(--warn); }
+  .pill-danger { background: var(--danger-light); color: var(--danger); }
+  .pill-info { background: var(--info-light); color: var(--info); }
+  .pill-gray { background: var(--surface2); color: var(--text2); }
+
+  /* Attendance checkboxes */
+  .period-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .period-row:last-child { border-bottom: none; }
+  .period-num { width: 24px; height: 24px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--text2); flex-shrink: 0; }
+  .period-subject { flex: 1; font-size: 13px; }
+  .period-subject .sub { font-size: 11px; color: var(--text3); }
+  .chk-group { display: flex; gap: 6px; }
+  .chk-label { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
+  .chk-label input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+
+  /* Student list */
+  .student-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .student-item:last-child { border-bottom: none; }
+  .student-num { font-size: 12px; color: var(--text3); width: 28px; }
+  .student-name { flex: 1; font-size: 13px; font-weight: 500; }
+
+  /* Stat cards */
+  .stat-card { background: var(--surface2); border-radius: var(--radius); padding: 12px 16px; }
+  .stat-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+  .stat-value { font-size: 22px; font-weight: 700; }
+
+  /* Summary table for aggregation */
+  .agg-table th:first-child { position: sticky; left: 0; background: var(--surface2); z-index: 1; }
+  .agg-table td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+  .agg-count { text-align: center; font-weight: 600; }
+  .agg-count.zero { color: var(--text3); }
+  .agg-count.warn { color: var(--warn); }
+  .agg-count.danger { color: var(--danger); font-weight: 700; }
+
+  /* Day change panel */
+  .change-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface2); border-radius: var(--radius); margin-bottom: 8px; }
+  .change-item .info { flex: 1; font-size: 13px; }
+  .change-item .tag { font-size: 11px; font-weight: 600; }
+
+  /* Alert */
+  .alert { padding: 10px 14px; border-radius: var(--radius); font-size: 13px; margin-bottom: 12px; }
+  .alert-info { background: var(--info-light); color: var(--info); }
+  .alert-warn { background: var(--warn-light); color: var(--warn); }
+  .alert-success { background: var(--accent-light); color: var(--accent); }
+
+  /* Select subject modal */
+  .subject-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+  .subject-btn { padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 12px; cursor: pointer; text-align: left; transition: all .1s; }
+  .subject-btn:hover { border-color: var(--accent-mid); background: var(--accent-light); }
+  .subject-btn.selected { border-color: var(--accent-mid); background: var(--accent-light); color: var(--accent); font-weight: 600; }
+  .subject-cat { font-size: 11px; color: var(--text3); }
+  .section-title { font-size: 12px; font-weight: 700; color: var(--text2); margin: 12px 0 6px; text-transform: uppercase; letter-spacing: .5px; }
+
+  input[type=date], input[type=text], select { font-family: inherit; }
+  .hidden { display: none !important; }
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: white; padding: 10px 18px; border-radius: var(--radius); font-size: 13px; z-index: 300; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+
+  .loading { text-align: center; padding: 40px; color: var(--text3); }
+  .no-data { text-align: center; padding: 32px; color: var(--text3); font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>欠課管理システム</h1>
+    <span class="year-badge" id="year-badge">2025年度</span>
+    <nav>
+      <button class="active" onclick="showTab('settings')">設定</button>
+      <button onclick="showTab('daychange')">日課管理</button>
+      <button onclick="showTab('attendance')">出欠入力</button>
+      <button onclick="showTab('summary')">集計・出力</button>
+    </nav>
+  </header>
+  <main>
+    <!-- 設定タブ -->
+    <div id="tab-settings" class="tab-panel active">
+      <div class="grid-2" style="align-items:start">
+        <!-- 生徒管理 -->
+        <div>
+          <div class="card">
+            <div class="card-title"><span class="icon" style="background:var(--info-light);color:var(--info)">👥</span>生徒管理</div>
+            <div class="form-group">
+              <label>CSVファイル読み込み（出席番号,氏名）</label>
+              <input type="file" accept=".csv" id="csv-input" onchange="loadCSV(event)">
+            </div>
+            <div style="font-size:12px;color:var(--text3);margin-bottom:12px">形式: 1列目=出席番号, 2列目=氏名（ヘッダー行あり可）</div>
+            <div id="student-list-preview" class="no-data">生徒データがありません</div>
+          </div>
+        </div>
+        <!-- 科目リスト -->
+        <div>
+          <div class="card">
+            <div class="card-title"><span class="icon" style="background:var(--warn-light);color:var(--warn)">📚</span>科目リスト編集</div>
+            <div id="subject-list-ui"></div>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <input type="text" id="new-subject-name" placeholder="科目名" style="flex:1">
+              <select id="new-subject-cat" style="width:120px">
+                <option value="普通">普通</option>
+                <option value="理数">理数</option>
+                <option value="その他">その他</option>
+              </select>
+              <button class="btn btn-primary btn-sm" onclick="addCustomSubject()">追加</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 時間割設定 -->
+      <div class="card">
+        <div class="card-title"><span class="icon" style="background:var(--accent-light);color:var(--accent)">📅</span>時間割設定</div>
+        <div class="alert alert-info" style="margin-bottom:16px">セルをクリックして科目を割り当ててください。右クリックでクリア。</div>
+        <div class="form-group" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <label style="margin:0">最大時限数（曜日ごとに設定）：</label>
+        </div>
+        <div class="grid-2" style="margin-bottom:12px">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:12px;font-weight:700;color:var(--text2)">曜日ごとの最終時限</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px" id="day-max-periods"></div>
+          </div>
+        </div>
+        <div id="timetable-grid"></div>
+        <div class="btn-row"><button class="btn btn-primary" onclick="saveTimetable()">時間割を保存</button></div>
+      </div>
+      <!-- Firebase設定 -->
+      <div class="card">
+        <div class="card-title"><span class="icon" style="background:#fff3e0;color:#e65100">🔥</span>Firebase設定</div>
+        <div class="form-group">
+          <label>Firebase Config（JSON形式）</label>
+          <textarea id="fb-config-input" rows="6" placeholder='{"apiKey":"...","authDomain":"...","projectId":"..."}'></textarea>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" onclick="saveFirebaseConfig()">接続する</button></div>
+        <div id="fb-status" style="font-size:12px;margin-top:8px;color:var(--text3)">未接続</div>
+      </div>
+    </div>
+
+    <!-- 日課管理タブ -->
+    <div id="tab-daychange" class="tab-panel">
+      <div class="grid-2" style="align-items:start">
+        <div>
+          <div class="card">
+            <div class="card-title">日課変更・授業変更の登録</div>
+            <div class="form-group">
+              <label>対象日</label>
+              <input type="date" id="dc-date">
+            </div>
+            <div class="form-group">
+              <label>変更種別</label>
+              <select id="dc-type" onchange="updateDCForm()">
+                <option value="day">曜日変更（○曜日日課）</option>
+                <option value="cut">授業カット（○限以降をカット）</option>
+                <option value="swap">コマ置き換え（特定時限を別科目に）</option>
+              </select>
+            </div>
+            <div id="dc-day-form">
+              <div class="form-group">
+                <label>適用する曜日日課</label>
+                <select id="dc-day-value">
+                  <option value="0">月曜日</option>
+                  <option value="1">火曜日</option>
+                  <option value="2">水曜日</option>
+                  <option value="3">木曜日</option>
+                  <option value="4">金曜日</option>
+                </select>
+              </div>
+            </div>
+            <div id="dc-cut-form" class="hidden">
+              <div class="form-group">
+                <label>○限以降をカット</label>
+                <select id="dc-cut-value">
+                  <option value="1">1限以降</option>
+                  <option value="2">2限以降</option>
+                  <option value="3">3限以降</option>
+                  <option value="4">4限以降</option>
+                  <option value="5">5限以降</option>
+                  <option value="6">6限以降</option>
+                  <option value="7">7限以降</option>
+                </select>
+              </div>
+            </div>
+            <div id="dc-swap-form" class="hidden">
+              <div class="form-group">
+                <label>置き換える時限</label>
+                <select id="dc-swap-period">
+                  <option value="1">1限</option><option value="2">2限</option><option value="3">3限</option>
+                  <option value="4">4限</option><option value="5">5限</option><option value="6">6限</option><option value="7">7限</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>置き換え後の科目</label>
+                <select id="dc-swap-subject"></select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>メモ（任意）</label>
+              <input type="text" id="dc-memo" placeholder="例：体育祭準備">
+            </div>
+            <button class="btn btn-primary" onclick="addDayChange()">登録</button>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <div class="card-title">登録済み変更一覧</div>
+            <div id="daychange-list" class="no-data">変更の登録がありません</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 出欠入力タブ -->
+    <div id="tab-attendance" class="tab-panel">
+      <div class="grid-2" style="align-items:start">
+        <div>
+          <div class="card">
+            <div class="card-title">入力対象の選択</div>
+            <div class="form-group">
+              <label>日付</label>
+              <input type="date" id="att-date" onchange="loadAttendanceDay()">
+            </div>
+            <div id="att-student-list" class="no-data">生徒データがありません</div>
+          </div>
+        </div>
+        <div>
+          <div class="card" id="att-form-card" style="display:none">
+            <div class="card-title" id="att-student-name">出欠入力</div>
+            <div id="att-periods"></div>
+            <div class="btn-row">
+              <button class="btn" onclick="setAllPresent()">全出席</button>
+              <button class="btn btn-danger btn-sm" onclick="setAllAbsent()">全欠課</button>
+              <button class="btn btn-primary" onclick="saveAttendance()">保存</button>
+            </div>
+          </div>
+          <div class="card" id="att-placeholder" style="text-align:center;padding:40px;color:var(--text3)">
+            ← 生徒を選択してください
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 集計・出力タブ -->
+    <div id="tab-summary" class="tab-panel">
+      <div class="card">
+        <div class="card-title">集計条件</div>
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="margin:0">
+            <label>開始日</label>
+            <input type="date" id="sum-from">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>終了日</label>
+            <input type="date" id="sum-to">
+          </div>
+          <button class="btn btn-primary" onclick="calcSummary()">集計する</button>
+          <button class="btn" onclick="exportExcel()">Excelで出力</button>
+        </div>
+      </div>
+      <div class="card">
+        <div id="summary-table" class="no-data">集計を実行してください</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 科目選択モーダル -->
+<div id="subject-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:560px">
+    <h2 style="margin-bottom:12px">科目を選択</h2>
+    <input type="text" id="subject-search" placeholder="科目名で絞り込み..." onInput="filterSubjects()" style="margin-bottom:12px;width:100%">
+    <div id="subject-modal-list" class="subject-grid"></div>
+    <div class="btn-row">
+      <button class="btn" onclick="closeSubjectModal()">キャンセル</button>
+      <button class="btn btn-danger btn-sm" onclick="clearTTCell()">クリア</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ======== DATA ========
+const DAYS = ['月','火','水','木','金'];
+const MAX_PERIODS = 7;
+
+const DEFAULT_SUBJECTS = [
+  {name:'現代の国語',cat:'普通'},{name:'言語文化',cat:'普通'},{name:'論理国語',cat:'普通'},
+  {name:'文学国語',cat:'普通'},{name:'国語表現',cat:'普通'},
+  {name:'数学I',cat:'普通'},{name:'数学II',cat:'普通'},{name:'数学III',cat:'普通'},
+  {name:'数学A',cat:'普通'},{name:'数学B',cat:'普通'},{name:'数学C',cat:'普通'},
+  {name:'英語コミュニケーションI',cat:'普通'},{name:'英語コミュニケーションII',cat:'普通'},
+  {name:'英語コミュニケーションIII',cat:'普通'},{name:'論理・表現I',cat:'普通'},
+  {name:'論理・表現II',cat:'普通'},{name:'論理・表現III',cat:'普通'},
+  {name:'物理基礎',cat:'普通'},{name:'物理',cat:'普通'},{name:'化学基礎',cat:'普通'},
+  {name:'化学',cat:'普通'},{name:'生物基礎',cat:'普通'},{name:'生物',cat:'普通'},
+  {name:'地学基礎',cat:'普通'},{name:'地学',cat:'普通'},
+  {name:'地理総合',cat:'普通'},{name:'地理探究',cat:'普通'},
+  {name:'歴史総合',cat:'普通'},{name:'日本史探究',cat:'普通'},{name:'世界史探究',cat:'普通'},
+  {name:'公共',cat:'普通'},{name:'倫理',cat:'普通'},{name:'政治・経済',cat:'普通'},
+  {name:'体育',cat:'普通'},{name:'保健',cat:'普通'},
+  {name:'音楽I',cat:'普通'},{name:'美術I',cat:'普通'},{name:'書道I',cat:'普通'},
+  {name:'情報I',cat:'普通'},{name:'情報II',cat:'普通'},
+  {name:'家庭基礎',cat:'普通'},{name:'家庭総合',cat:'普通'},
+  {name:'総合的な探究の時間',cat:'普通'},{name:'ホームルーム',cat:'その他'},
+  {name:'理数探究基礎',cat:'理数'},{name:'理数探究',cat:'理数'},
+  {name:'理数数学I',cat:'理数'},{name:'理数数学II',cat:'理数'},
+  {name:'理数数学特論',cat:'理数'},{name:'理数物理',cat:'理数'},
+  {name:'理数化学',cat:'理数'},{name:'理数生物',cat:'理数'},{name:'理数地学',cat:'理数'},
+];
+
+let state = {
+  firebase: null,
+  db: null,
+  fbConfigRaw: '',
+  students: [],
+  subjects: JSON.parse(localStorage.getItem('subjects') || 'null') || DEFAULT_SUBJECTS,
+  timetable: JSON.parse(localStorage.getItem('timetable') || 'null') || {},
+  dayMaxPeriods: JSON.parse(localStorage.getItem('dayMaxPeriods') || 'null') || {0:6,1:6,2:6,3:6,4:6},
+  dayChanges: {},
+  attendance: {},
+  selectedTTCell: null,
+  currentAttStudent: null,
+  summaryData: null,
+};
+
+// ======== FIREBASE ========
+function saveFirebaseConfig() {
+  const raw = document.getElementById('fb-config-input').value.trim();
+  try {
+    const cfg = JSON.parse(raw);
+    if (state.firebase) { try { state.firebase.delete(); } catch(e){} }
+    state.firebase = firebase.initializeApp(cfg, 'main_' + Date.now());
+    state.db = state.firebase.firestore();
+    localStorage.setItem('fbConfig', raw);
+    document.getElementById('fb-status').textContent = '✅ 接続済み: ' + (cfg.projectId || '');
+    document.getElementById('fb-status').style.color = 'var(--accent)';
+    loadFromFirestore();
+    toast('Firebase接続成功');
+  } catch(e) {
+    document.getElementById('fb-status').textContent = '❌ エラー: ' + e.message;
+    document.getElementById('fb-status').style.color = 'var(--danger)';
+  }
+}
+
+async function loadFromFirestore() {
+  if (!state.db) return;
+  try {
+    const [studentsSnap, dcSnap, attSnap] = await Promise.all([
+      state.db.collection('students').orderBy('num').get(),
+      state.db.collection('dayChanges').get(),
+      state.db.collection('attendance').get(),
+    ]);
+    state.students = studentsSnap.docs.map(d => d.data());
+    state.dayChanges = {};
+    dcSnap.docs.forEach(d => state.dayChanges[d.id] = d.data().changes || []);
+    state.attendance = {};
+    attSnap.docs.forEach(d => state.attendance[d.id] = d.data());
+    renderStudentList();
+    renderDayChangeList();
+    toast('Firestoreからデータを読み込みました');
+  } catch(e) { console.error(e); }
+}
+
+async function saveToFirestore(collection, docId, data) {
+  if (!state.db) return;
+  try {
+    await state.db.collection(collection).doc(docId).set(data, {merge: true});
+  } catch(e) { console.error('Firestore save error', e); }
+}
+
+// ======== TAB ========
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'settings') { renderSubjectList(); renderTimetable(); }
+  if (name === 'daychange') { renderDayChangeList(); populateSwapSubjects(); }
+  if (name === 'attendance') { renderAttStudentList(); }
+  if (name === 'summary') {}
+}
+
+// ======== CSV ========
+function loadCSV(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const lines = ev.target.result.split(/\r?\n/).filter(l => l.trim());
+    let students = [];
+    for (const line of lines) {
+      const parts = line.split(',').map(s => s.trim().replace(/^"|"$/g,''));
+      if (!parts[1]) continue;
+      const num = parseInt(parts[0]);
+      if (isNaN(num)) continue;
+      students.push({num, name: parts[1]});
+    }
+    students.sort((a,b) => a.num - b.num);
+    state.students = students;
+    renderStudentList();
+    if (state.db) {
+      const batch = state.db.batch();
+      students.forEach(s => {
+        const ref = state.db.collection('students').doc(String(s.num));
+        batch.set(ref, s);
+      });
+      await batch.commit();
+      toast('生徒データを保存しました');
+    } else {
+      toast('生徒データを読み込みました（Firebase未接続）');
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function renderStudentList() {
+  const el = document.getElementById('student-list-preview');
+  if (!state.students.length) { el.innerHTML = '<div class="no-data">生徒データがありません</div>'; return; }
+  el.innerHTML = `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">${state.students.length}名</div>` +
+    state.students.slice(0,10).map(s =>
+      `<div class="student-item"><span class="student-num">${s.num}</span><span class="student-name">${s.name}</span></div>`
+    ).join('') +
+    (state.students.length > 10 ? `<div style="font-size:12px;color:var(--text3);padding:8px 0">...他${state.students.length - 10}名</div>` : '');
+}
+
+// ======== SUBJECTS ========
+function renderSubjectList() {
+  const cats = ['普通','理数','その他'];
+  let html = '';
+  cats.forEach(cat => {
+    const subs = state.subjects.filter(s => s.cat === cat);
+    if (!subs.length) return;
+    html += `<div class="section-title">${cat}教科</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">`;
+    subs.forEach((s, idx) => {
+      const globalIdx = state.subjects.indexOf(s);
+      html += `<span class="pill pill-${cat==='普通'?'accent':cat==='理数'?'info':'gray'}" style="cursor:pointer" title="クリックで削除" onclick="removeSubject(${globalIdx})">${s.name} ✕</span>`;
+    });
+    html += '</div>';
+  });
+  document.getElementById('subject-list-ui').innerHTML = html;
+}
+
+function addCustomSubject() {
+  const name = document.getElementById('new-subject-name').value.trim();
+  const cat = document.getElementById('new-subject-cat').value;
+  if (!name) return;
+  if (state.subjects.find(s => s.name === name)) { toast('既に存在します'); return; }
+  state.subjects.push({name, cat});
+  localStorage.setItem('subjects', JSON.stringify(state.subjects));
+  document.getElementById('new-subject-name').value = '';
+  renderSubjectList();
+  populateSwapSubjects();
+}
+
+function removeSubject(idx) {
+  if (!confirm(`「${state.subjects[idx].name}」を削除しますか？`)) return;
+  state.subjects.splice(idx, 1);
+  localStorage.setItem('subjects', JSON.stringify(state.subjects));
+  renderSubjectList();
+}
+
+// ======== TIMETABLE ========
+function renderTimetable() {
+  // Day max period selectors
+  const dmpEl = document.getElementById('day-max-periods');
+  dmpEl.innerHTML = DAYS.map((d, i) =>
+    `<label style="display:flex;align-items:center;gap:4px;font-size:13px">
+      ${d}曜:
+      <select onchange="setDayMax(${i},this.value)" style="width:60px">
+        ${[5,6,7].map(n => `<option value="${n}" ${state.dayMaxPeriods[i]==n?'selected':''}>${n}限</option>`).join('')}
+      </select>
+    </label>`
+  ).join('');
+
+  // Grid
+  const maxP = MAX_PERIODS;
+  let html = `<div class="tt-grid" style="grid-template-columns:48px repeat(5, 1fr);gap:4px">`;
+  html += `<div class="tt-period"></div>` + DAYS.map(d => `<div class="tt-header">${d}</div>`).join('');
+  for (let p = 1; p <= maxP; p++) {
+    html += `<div class="tt-period">${p}限</div>`;
+    for (let d = 0; d < 5; d++) {
+      const max = state.dayMaxPeriods[d] || 6;
+      const disabled = p > max;
+      const key = `${d}_${p}`;
+      const sub = state.timetable[key];
+      if (disabled) {
+        html += `<div class="tt-cell tt-disabled"><span style="font-size:11px;color:var(--text3)">－</span></div>`;
+      } else {
+        html += `<div class="tt-cell ${sub?'filled':''}" onclick="openSubjectModal(${d},${p})" oncontextmenu="clearTTCellDirect(${d},${p});return false">
+          ${sub ? `<span class="subject-name">${sub}</span>` : '<span style="font-size:11px;color:var(--text3)">空き</span>'}
+        </div>`;
+      }
+    }
+  }
+  html += '</div>';
+  document.getElementById('timetable-grid').innerHTML = html;
+}
+
+function setDayMax(dayIdx, val) {
+  state.dayMaxPeriods[dayIdx] = parseInt(val);
+  localStorage.setItem('dayMaxPeriods', JSON.stringify(state.dayMaxPeriods));
+  renderTimetable();
+}
+
+function openSubjectModal(d, p) {
+  state.selectedTTCell = {d, p};
+  filterSubjects();
+  document.getElementById('subject-modal').classList.remove('hidden');
+  document.getElementById('subject-search').value = '';
+  filterSubjects();
+}
+
+function closeSubjectModal() {
+  document.getElementById('subject-modal').classList.add('hidden');
+  state.selectedTTCell = null;
+}
+
+function filterSubjects() {
+  const q = document.getElementById('subject-search').value.trim().toLowerCase();
+  const filtered = state.subjects.filter(s => !q || s.name.toLowerCase().includes(q) || s.cat.includes(q));
+  const cats = ['普通','理数','その他'];
+  let html = '';
+  cats.forEach(cat => {
+    const subs = filtered.filter(s => s.cat === cat);
+    if (!subs.length) return;
+    html += `<div style="grid-column:1/-1" class="section-title">${cat}</div>`;
+    subs.forEach(s => {
+      const key = state.selectedTTCell ? `${state.selectedTTCell.d}_${state.selectedTTCell.p}` : '';
+      const sel = state.timetable[key] === s.name;
+      html += `<div class="subject-btn ${sel?'selected':''}" onclick="selectSubject('${s.name.replace(/'/g,"\\'")}')">
+        <div>${s.name}</div><div class="subject-cat">${s.cat}</div>
+      </div>`;
+    });
+  });
+  document.getElementById('subject-modal-list').innerHTML = html || '<div class="no-data">該当なし</div>';
+}
+
+function selectSubject(name) {
+  if (!state.selectedTTCell) return;
+  const {d, p} = state.selectedTTCell;
+  state.timetable[`${d}_${p}`] = name;
+  closeSubjectModal();
+  renderTimetable();
+}
+
+function clearTTCell() {
+  if (!state.selectedTTCell) return;
+  const {d, p} = state.selectedTTCell;
+  delete state.timetable[`${d}_${p}`];
+  closeSubjectModal();
+  renderTimetable();
+}
+
+function clearTTCellDirect(d, p) {
+  delete state.timetable[`${d}_${p}`];
+  renderTimetable();
+}
+
+function saveTimetable() {
+  localStorage.setItem('timetable', JSON.stringify(state.timetable));
+  localStorage.setItem('dayMaxPeriods', JSON.stringify(state.dayMaxPeriods));
+  if (state.db) {
+    saveToFirestore('settings', 'timetable', {timetable: state.timetable, dayMaxPeriods: state.dayMaxPeriods});
+  }
+  toast('時間割を保存しました');
+}
+
+// ======== DAY CHANGES ========
+function updateDCForm() {
+  const t = document.getElementById('dc-type').value;
+  document.getElementById('dc-day-form').classList.toggle('hidden', t !== 'day');
+  document.getElementById('dc-cut-form').classList.toggle('hidden', t !== 'cut');
+  document.getElementById('dc-swap-form').classList.toggle('hidden', t !== 'swap');
+}
+
+function populateSwapSubjects() {
+  const sel = document.getElementById('dc-swap-subject');
+  if (!sel) return;
+  sel.innerHTML = state.subjects.map(s => `<option value="${s.name}">${s.name}（${s.cat}）</option>`).join('');
+}
+
+async function addDayChange() {
+  const date = document.getElementById('dc-date').value;
+  if (!date) { toast('日付を選択してください'); return; }
+  const type = document.getElementById('dc-type').value;
+  let change = {type};
+  if (type === 'day') change.dayIdx = parseInt(document.getElementById('dc-day-value').value);
+  if (type === 'cut') change.fromPeriod = parseInt(document.getElementById('dc-cut-value').value);
+  if (type === 'swap') {
+    change.period = parseInt(document.getElementById('dc-swap-period').value);
+    change.subject = document.getElementById('dc-swap-subject').value;
+  }
+  change.memo = document.getElementById('dc-memo').value;
+  if (!state.dayChanges[date]) state.dayChanges[date] = [];
+  state.dayChanges[date].push(change);
+  if (state.db) await saveToFirestore('dayChanges', date, {changes: state.dayChanges[date]});
+  renderDayChangeList();
+  document.getElementById('dc-date').value = '';
+  document.getElementById('dc-memo').value = '';
+  toast('変更を登録しました');
+}
+
+function renderDayChangeList() {
+  const el = document.getElementById('daychange-list');
+  const entries = Object.entries(state.dayChanges).sort((a,b) => a[0].localeCompare(b[0]));
+  if (!entries.length) { el.innerHTML = '<div class="no-data">変更の登録がありません</div>'; return; }
+  let html = '';
+  entries.forEach(([date, changes]) => {
+    const d = new Date(date + 'T00:00');
+    const label = `${d.getMonth()+1}/${d.getDate()}（${DAYS[d.getDay()-1]||''}）`;
+    changes.forEach((c, i) => {
+      let desc = '';
+      let pill = 'pill-gray';
+      if (c.type === 'day') { desc = `${DAYS[c.dayIdx]}曜日課`; pill = 'pill-info'; }
+      if (c.type === 'cut') { desc = `${c.fromPeriod}限以降カット`; pill = 'pill-warn'; }
+      if (c.type === 'swap') { desc = `${c.period}限 → ${c.subject}`; pill = 'pill-accent'; }
+      if (c.memo) desc += `（${c.memo}）`;
+      html += `<div class="change-item">
+        <span style="font-size:13px;font-weight:600;min-width:80px">${label}</span>
+        <span class="pill ${pill}">${desc}</span>
+        <button class="btn btn-danger btn-sm" onclick="removeDayChange('${date}',${i})">削除</button>
+      </div>`;
+    });
+  });
+  el.innerHTML = html;
+}
+
+async function removeDayChange(date, idx) {
+  state.dayChanges[date].splice(idx, 1);
+  if (!state.dayChanges[date].length) delete state.dayChanges[date];
+  if (state.db) {
+    if (state.dayChanges[date]) await saveToFirestore('dayChanges', date, {changes: state.dayChanges[date]});
+    else await state.db.collection('dayChanges').doc(date).delete();
+  }
+  renderDayChangeList();
+}
+
+// ======== EFFECTIVE TIMETABLE ========
+function getEffectiveTimetable(dateStr) {
+  const date = new Date(dateStr + 'T00:00');
+  let dayIdx = date.getDay() - 1; // 0=Mon
+  let maxP = state.dayMaxPeriods[dayIdx] || 6;
+  let periods = {};
+
+  const changes = state.dayChanges[dateStr] || [];
+
+  // Apply day change first
+  const dayChange = changes.find(c => c.type === 'day');
+  if (dayChange) {
+    dayIdx = dayChange.dayIdx;
+    maxP = state.dayMaxPeriods[dayIdx] || 6;
+  }
+
+  // Build base timetable
+  for (let p = 1; p <= maxP; p++) {
+    const sub = state.timetable[`${dayIdx}_${p}`];
+    if (sub) periods[p] = sub;
+  }
+
+  // Apply cut
+  const cut = changes.find(c => c.type === 'cut');
+  if (cut) {
+    for (let p = cut.fromPeriod; p <= MAX_PERIODS; p++) delete periods[p];
+    maxP = cut.fromPeriod - 1;
+  }
+
+  // Apply swaps
+  changes.filter(c => c.type === 'swap').forEach(c => {
+    if (c.period <= maxP) periods[c.period] = c.subject;
+  });
+
+  return {periods, maxP};
+}
+
+// ======== ATTENDANCE ========
+function renderAttStudentList() {
+  const el = document.getElementById('att-student-list');
+  if (!state.students.length) { el.innerHTML = '<div class="no-data">生徒データがありません</div>'; return; }
+  el.innerHTML = state.students.map(s =>
+    `<div class="student-item" style="cursor:pointer" onclick="selectAttStudent(${s.num})">
+      <span class="student-num">${s.num}</span>
+      <span class="student-name">${s.name}</span>
+      <span id="att-status-${s.num}" style="font-size:11px;color:var(--text3)"></span>
+    </div>`
+  ).join('');
+  updateAttStatusIndicators();
+}
+
+function updateAttStatusIndicators() {
+  const date = document.getElementById('att-date').value;
+  if (!date) return;
+  state.students.forEach(s => {
+    const el = document.getElementById(`att-status-${s.num}`);
+    if (!el) return;
+    const key = `${date}_${s.num}`;
+    const att = state.attendance[key];
+    if (!att) { el.textContent = ''; return; }
+    const absent = Object.values(att.periods || {}).filter(v => !v).length;
+    el.textContent = absent > 0 ? `欠${absent}` : '出席済';
+    el.style.color = absent > 0 ? 'var(--danger)' : 'var(--accent)';
+  });
+}
+
+function loadAttendanceDay() {
+  renderAttStudentList();
+  if (state.currentAttStudent) selectAttStudent(state.currentAttStudent);
+}
+
+function selectAttStudent(num) {
+  state.currentAttStudent = num;
+  const student = state.students.find(s => s.num === num);
+  const date = document.getElementById('att-date').value;
+  if (!date) { toast('日付を選択してください'); return; }
+
+  document.getElementById('att-placeholder').style.display = 'none';
+  document.getElementById('att-form-card').style.display = 'block';
+  document.getElementById('att-student-name').textContent = `${student.num}. ${student.name}`;
+
+  const {periods, maxP} = getEffectiveTimetable(date);
+  const key = `${date}_${num}`;
+  const saved = state.attendance[key]?.periods || {};
+
+  let html = '';
+  if (!Object.keys(periods).length) {
+    html = '<div class="no-data">この日の授業はありません（日課変更・カット等を確認）</div>';
+  } else {
+    for (let p = 1; p <= maxP; p++) {
+      const sub = periods[p];
+      if (!sub) continue;
+      const present = saved[p] !== undefined ? saved[p] : true;
+      html += `<div class="period-row">
+        <span class="period-num">${p}</span>
+        <span class="period-subject">${sub}</span>
+        <label class="chk-label">
+          <input type="checkbox" id="att-chk-${p}" ${present?'checked':''}>
+          出席
+        </label>
+      </div>`;
+    }
+  }
+  document.getElementById('att-periods').innerHTML = html;
+}
+
+function setAllPresent() {
+  document.querySelectorAll('[id^=att-chk-]').forEach(chk => chk.checked = true);
+}
+function setAllAbsent() {
+  document.querySelectorAll('[id^=att-chk-]').forEach(chk => chk.checked = false);
+}
+
+async function saveAttendance() {
+  const date = document.getElementById('att-date').value;
+  const num = state.currentAttStudent;
+  if (!date || !num) return;
+  const {periods, maxP} = getEffectiveTimetable(date);
+  let attPeriods = {};
+  for (let p = 1; p <= maxP; p++) {
+    if (!periods[p]) continue;
+    const chk = document.getElementById(`att-chk-${p}`);
+    if (chk) attPeriods[p] = chk.checked;
+  }
+  const key = `${date}_${num}`;
+  state.attendance[key] = {date, studentNum: num, periods: attPeriods};
+  if (state.db) await saveToFirestore('attendance', key, state.attendance[key]);
+  updateAttStatusIndicators();
+  toast('出欠を保存しました');
+}
+
+// ======== SUMMARY ========
+function calcSummary() {
+  const from = document.getElementById('sum-from').value;
+  const to = document.getElementById('sum-to').value;
+  if (!from || !to) { toast('期間を指定してください'); return; }
+
+  // Collect all subjects from attendance data
+  const subjectSet = new Set();
+  Object.entries(state.attendance).forEach(([key, att]) => {
+    const [date] = key.split('_');
+    if (date < from || date > to) return;
+    const {periods} = getEffectiveTimetable(date);
+    Object.values(periods).forEach(s => subjectSet.add(s));
+  });
+  const subjects = Array.from(subjectSet).sort();
+
+  // Per student aggregation
+  const result = {};
+  state.students.forEach(s => { result[s.num] = {name: s.name, counts: {}}; });
+
+  Object.entries(state.attendance).forEach(([key, att]) => {
+    const [date, numStr] = key.split('_');
+    const num = parseInt(numStr);
+    if (date < from || date > to) return;
+    if (!result[num]) return;
+    const {periods} = getEffectiveTimetable(date);
+    Object.entries(att.periods || {}).forEach(([p, present]) => {
+      if (present) return;
+      const sub = periods[parseInt(p)];
+      if (!sub) return;
+      result[num].counts[sub] = (result[num].counts[sub] || 0) + 1;
+    });
+  });
+
+  state.summaryData = {subjects, result, from, to};
+  renderSummaryTable();
+}
+
+function renderSummaryTable() {
+  const {subjects, result} = state.summaryData;
+  if (!subjects.length) {
+    document.getElementById('summary-table').innerHTML = '<div class="no-data">該当データがありません</div>';
+    return;
+  }
+  let html = `<div class="tbl-wrap"><table class="agg-table">
+    <thead><tr><th>番号</th><th>氏名</th>`;
+  subjects.forEach(s => html += `<th style="writing-mode:vertical-rl;min-width:36px;padding:8px 4px">${s}</th>`);
+  html += `<th>合計</th></tr></thead><tbody>`;
+
+  state.students.forEach(s => {
+    const r = result[s.num];
+    if (!r) return;
+    const total = Object.values(r.counts).reduce((a,b) => a+b, 0);
+    html += `<tr><td style="color:var(--text3)">${s.num}</td><td style="font-weight:500">${s.name}</td>`;
+    subjects.forEach(sub => {
+      const cnt = r.counts[sub] || 0;
+      const cls = cnt === 0 ? 'zero' : cnt >= 10 ? 'danger' : cnt >= 5 ? 'warn' : '';
+      html += `<td class="agg-count ${cls}">${cnt || '–'}</td>`;
+    });
+    const tcls = total === 0 ? 'zero' : total >= 20 ? 'danger' : total >= 10 ? 'warn' : '';
+    html += `<td class="agg-count ${tcls}" style="font-weight:700">${total || '–'}</td></tr>`;
+  });
+  html += '</tbody></table></div>';
+  document.getElementById('summary-table').innerHTML = html;
+}
+
+function exportExcel() {
+  if (!state.summaryData) { toast('先に集計を実行してください'); return; }
+  const {subjects, result, from, to} = state.summaryData;
+  const headers = ['番号', '氏名', ...subjects, '合計'];
+  const rows = [headers];
+  state.students.forEach(s => {
+    const r = result[s.num];
+    if (!r) return;
+    const total = Object.values(r.counts).reduce((a,b) => a+b, 0);
+    rows.push([s.num, s.name, ...subjects.map(sub => r.counts[sub] || 0), total]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = headers.map((h, i) => ({wch: i <= 1 ? 12 : 8}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '欠課集計');
+  XLSX.writeFile(wb, `欠課集計_${from}_${to}.xlsx`);
+}
+
+// ======== TOAST ========
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ======== INIT ========
+function init() {
+  const year = new Date().getFullYear();
+  const month = new Date().getMonth() + 1;
+  document.getElementById('year-badge').textContent = (month >= 4 ? year : year - 1) + '年度';
+
+  // Set today's date
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('att-date').value = today;
+  document.getElementById('dc-date').value = today;
+  document.getElementById('sum-from').value = today.slice(0,7) + '-01';
+  document.getElementById('sum-to').value = today;
+
+  // Restore Firebase
+  const savedCfg = localStorage.getItem('fbConfig');
+  if (savedCfg) {
+    document.getElementById('fb-config-input').value = savedCfg;
+    saveFirebaseConfig();
+  }
+
+  renderSubjectList();
+  renderTimetable();
+  populateSwapSubjects();
+  updateDCForm();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
