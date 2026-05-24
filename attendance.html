@@ -255,6 +255,7 @@
                 <option value="day">曜日変更（○曜日日課）</option>
                 <option value="cut">授業カット（○限以降をカット）</option>
                 <option value="swap">コマ置き換え（特定時限を別科目に）</option>
+                <option value="test">テスト日時間割（時限ごとに科目を指定）</option>
               </select>
             </div>
             <div id="dc-day-form">
@@ -296,9 +297,13 @@
                 <select id="dc-swap-subject"></select>
               </div>
             </div>
+            <div id="dc-test-form" class="hidden">
+              <div style="font-size:12px;color:var(--text2);margin-bottom:8px">各時限の科目を指定してください。空欄の時限は授業なし（カット）扱いになります。</div>
+              <div id="dc-test-periods"></div>
+            </div>
             <div class="form-group">
               <label>メモ（任意）</label>
-              <input type="text" id="dc-memo" placeholder="例：体育祭準備">
+              <input type="text" id="dc-memo" placeholder="例：体育祭準備、中間テスト">
             </div>
             <button class="btn btn-primary" onclick="addDayChange()">登録</button>
           </div>
@@ -688,6 +693,23 @@ function updateDCForm() {
   document.getElementById('dc-day-form').classList.toggle('hidden', t !== 'day');
   document.getElementById('dc-cut-form').classList.toggle('hidden', t !== 'cut');
   document.getElementById('dc-swap-form').classList.toggle('hidden', t !== 'swap');
+  document.getElementById('dc-test-form').classList.toggle('hidden', t !== 'test');
+  if (t === 'test') renderTestPeriodInputs();
+}
+
+function renderTestPeriodInputs() {
+  const subjectOptions = state.subjects.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+  let html = '';
+  for (let p = 1; p <= MAX_PERIODS; p++) {
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="width:36px;font-size:13px;font-weight:600;color:var(--text2);flex-shrink:0">${p}限</span>
+      <select id="dc-test-p${p}" style="flex:1;font-size:13px">
+        <option value="">－（授業なし）</option>
+        ${subjectOptions}
+      </select>
+    </div>`;
+  }
+  document.getElementById('dc-test-periods').innerHTML = html;
 }
 
 function populateSwapSubjects() {
@@ -707,8 +729,22 @@ async function addDayChange() {
     change.period = parseInt(document.getElementById('dc-swap-period').value);
     change.subject = document.getElementById('dc-swap-subject').value;
   }
+  if (type === 'test') {
+    let testPeriods = {};
+    for (let p = 1; p <= MAX_PERIODS; p++) {
+      const sel = document.getElementById(`dc-test-p${p}`);
+      if (sel && sel.value) testPeriods[p] = sel.value;
+    }
+    if (!Object.keys(testPeriods).length) { toast('少なくとも1つの時限に科目を設定してください'); return; }
+    change.periods = testPeriods;
+  }
   change.memo = document.getElementById('dc-memo').value;
   if (!state.dayChanges[date]) state.dayChanges[date] = [];
+  // テスト日登録の場合は既存の同日テスト日登録を上書き
+  if (type === 'test') {
+    const idx = state.dayChanges[date].findIndex(c => c.type === 'test');
+    if (idx >= 0) state.dayChanges[date].splice(idx, 1);
+  }
   state.dayChanges[date].push(change);
   if (state.db) await saveToFirestore('dayChanges', date, {changes: state.dayChanges[date]});
   renderDayChangeList();
@@ -731,6 +767,11 @@ function renderDayChangeList() {
       if (c.type === 'day') { desc = `${DAYS[c.dayIdx]}曜日課`; pill = 'pill-info'; }
       if (c.type === 'cut') { desc = `${c.fromPeriod}限以降カット`; pill = 'pill-warn'; }
       if (c.type === 'swap') { desc = `${c.period}限 → ${c.subject}`; pill = 'pill-accent'; }
+      if (c.type === 'test') {
+        const pEntries = Object.entries(c.periods || {}).map(([p,s]) => `${p}限:${s}`).join('、');
+        desc = `テスト日（${pEntries}）`;
+        pill = 'pill-danger';
+      }
       if (c.memo) desc += `（${c.memo}）`;
       html += `<div class="change-item">
         <span style="font-size:13px;font-weight:600;min-width:80px">${label}</span>
@@ -760,6 +801,16 @@ function getEffectiveTimetable(dateStr) {
   let periods = {};
 
   const changes = state.dayChanges[dateStr] || [];
+
+  // テスト日時間割が登録されている場合は最優先で適用（他の変更は無視）
+  const testChange = changes.find(c => c.type === 'test');
+  if (testChange && testChange.periods) {
+    const testPeriods = testChange.periods;
+    const periodNums = Object.keys(testPeriods).map(Number);
+    periodNums.forEach(p => { periods[p] = testPeriods[p]; });
+    maxP = periodNums.length ? Math.max(...periodNums) : 0;
+    return {periods, maxP};
+  }
 
   // Apply day change first
   const dayChange = changes.find(c => c.type === 'day');
