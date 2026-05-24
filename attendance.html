@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -315,31 +314,21 @@
 
     <!-- 出欠入力タブ -->
     <div id="tab-attendance" class="tab-panel">
-      <div class="grid-2" style="align-items:start">
-        <div>
-          <div class="card">
-            <div class="card-title">入力対象の選択</div>
-            <div class="form-group">
-              <label>日付</label>
-              <input type="date" id="att-date" onchange="loadAttendanceDay()">
-            </div>
-            <div id="att-student-list" class="no-data">生徒データがありません</div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div class="form-group" style="margin:0">
+            <label>日付</label>
+            <input type="date" id="att-date" onchange="loadAttendanceDay()">
+          </div>
+          <div id="att-day-label" style="font-size:13px;color:var(--text2)"></div>
+          <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm" onclick="setAllPresentAll()">全員全出席</button>
+            <button class="btn btn-primary btn-sm" onclick="saveBulkAttendance()">💾 一括保存</button>
           </div>
         </div>
-        <div>
-          <div class="card" id="att-form-card" style="display:none">
-            <div class="card-title" id="att-student-name">出欠入力</div>
-            <div id="att-periods"></div>
-            <div class="btn-row">
-              <button class="btn" onclick="setAllPresent()">全出席</button>
-              <button class="btn btn-danger btn-sm" onclick="setAllAbsent()">全欠課</button>
-              <button class="btn btn-primary" onclick="saveAttendance()">保存</button>
-            </div>
-          </div>
-          <div class="card" id="att-placeholder" style="text-align:center;padding:40px;color:var(--text3)">
-            ← 生徒を選択してください
-          </div>
-        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div id="att-bulk-table" class="no-data" style="padding:32px">日付を選択してください</div>
       </div>
     </div>
 
@@ -801,97 +790,128 @@ function getEffectiveTimetable(dateStr) {
 }
 
 // ======== ATTENDANCE ========
-function renderAttStudentList() {
-  const el = document.getElementById('att-student-list');
-  if (!state.students.length) { el.innerHTML = '<div class="no-data">生徒データがありません</div>'; return; }
-  el.innerHTML = state.students.map(s =>
-    `<div class="student-item" style="cursor:pointer" onclick="selectAttStudent(${s.num})">
-      <span class="student-num">${s.num}</span>
-      <span class="student-name">${s.name}</span>
-      <span id="att-status-${s.num}" style="font-size:11px;color:var(--text3)"></span>
-    </div>`
-  ).join('');
-  updateAttStatusIndicators();
-}
-
-function updateAttStatusIndicators() {
-  const date = document.getElementById('att-date').value;
-  if (!date) return;
-  state.students.forEach(s => {
-    const el = document.getElementById(`att-status-${s.num}`);
-    if (!el) return;
-    const key = `${date}_${s.num}`;
-    const att = state.attendance[key];
-    if (!att) { el.textContent = ''; return; }
-    const absent = Object.values(att.periods || {}).filter(v => !v).length;
-    el.textContent = absent > 0 ? `欠${absent}` : '出席済';
-    el.style.color = absent > 0 ? 'var(--danger)' : 'var(--accent)';
-  });
-}
-
 function loadAttendanceDay() {
-  renderAttStudentList();
-  if (state.currentAttStudent) selectAttStudent(state.currentAttStudent);
+  const date = document.getElementById('att-date').value;
+  const labelEl = document.getElementById('att-day-label');
+  if (!date) { labelEl.textContent = ''; return; }
+  const d = new Date(date + 'T00:00');
+  const dayName = ['日','月','火','水','木','金','土'][d.getDay()];
+  labelEl.textContent = `（${dayName}曜日）`;
+  renderBulkAttendanceTable(date);
 }
 
-function selectAttStudent(num) {
-  state.currentAttStudent = num;
-  const student = state.students.find(s => s.num === num);
-  const date = document.getElementById('att-date').value;
-  if (!date) { toast('日付を選択してください'); return; }
-
-  document.getElementById('att-placeholder').style.display = 'none';
-  document.getElementById('att-form-card').style.display = 'block';
-  document.getElementById('att-student-name').textContent = `${student.num}. ${student.name}`;
+function renderBulkAttendanceTable(date) {
+  const el = document.getElementById('att-bulk-table');
+  if (!state.students.length) { el.innerHTML = '<div class="no-data" style="padding:32px">生徒データがありません</div>'; return; }
 
   const {periods, maxP} = getEffectiveTimetable(date);
-  const key = `${date}_${num}`;
-  const saved = state.attendance[key]?.periods || {};
+  const periodNums = [];
+  for (let p = 1; p <= maxP; p++) { if (periods[p]) periodNums.push(p); }
 
-  let html = '';
-  if (!Object.keys(periods).length) {
-    html = '<div class="no-data">この日の授業はありません（日課変更・カット等を確認）</div>';
-  } else {
-    for (let p = 1; p <= maxP; p++) {
-      const sub = periods[p];
-      if (!sub) continue;
-      const present = saved[p] !== undefined ? saved[p] : true;
-      html += `<div class="period-row">
-        <span class="period-num">${p}</span>
-        <span class="period-subject">${sub}</span>
-        <label class="chk-label">
-          <input type="checkbox" id="att-chk-${p}" ${present?'checked':''}>
-          出席
-        </label>
-      </div>`;
-    }
+  if (!periodNums.length) {
+    el.innerHTML = '<div class="no-data" style="padding:32px">この日の授業はありません（日課変更・カット等を確認）</div>';
+    return;
   }
-  document.getElementById('att-periods').innerHTML = html;
+
+  // Header
+  let html = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead>
+      <tr style="background:var(--surface2)">
+        <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);position:sticky;left:0;background:var(--surface2);z-index:2;min-width:160px">氏名</th>
+        <th style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);font-size:11px;color:var(--text2);white-space:nowrap">一括</th>`;
+  periodNums.forEach(p => {
+    html += `<th style="padding:6px 4px;text-align:center;border-bottom:1px solid var(--border);min-width:52px">
+      <div style="font-size:13px;font-weight:700">${p}限</div>
+      <div style="font-size:10px;color:var(--text3);font-weight:400">${periods[p]}</div>
+    </th>`;
+  });
+  html += `</tr></thead><tbody>`;
+
+  // Rows
+  state.students.forEach(s => {
+    const key = `${date}_${s.num}`;
+    const saved = state.attendance[key]?.periods || {};
+    html += `<tr id="att-row-${s.num}">
+      <td style="padding:8px 12px;border-bottom:1px solid var(--border);position:sticky;left:0;background:var(--surface);z-index:1;font-weight:500">
+        <span style="font-size:11px;color:var(--text3);margin-right:6px">${s.num}</span>${s.name}
+      </td>
+      <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap">
+        <button class="btn btn-sm" style="padding:2px 7px;font-size:11px" onclick="setRowPresent(${s.num},true)">全○</button>
+        <button class="btn btn-sm" style="padding:2px 7px;font-size:11px;margin-top:2px" onclick="setRowPresent(${s.num},false)">全×</button>
+      </td>`;
+    periodNums.forEach(p => {
+      const present = saved[p] !== undefined ? saved[p] : true;
+      html += `<td style="padding:4px;border-bottom:1px solid var(--border);text-align:center">
+        <label style="display:flex;align-items:center;justify-content:center;cursor:pointer">
+          <input type="checkbox" id="bulk-chk-${s.num}-${p}" ${present?'checked':''}
+            style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer"
+            onchange="onChkChange(${s.num},${p},this.checked)">
+        </label>
+      </td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  el.innerHTML = html;
 }
 
-function setAllPresent() {
-  document.querySelectorAll('[id^=att-chk-]').forEach(chk => chk.checked = true);
-}
-function setAllAbsent() {
-  document.querySelectorAll('[id^=att-chk-]').forEach(chk => chk.checked = false);
+function onChkChange(num, period, checked) {
+  // Visual feedback: row highlight if any absent
+  updateRowHighlight(num);
 }
 
-async function saveAttendance() {
+function updateRowHighlight(num) {
   const date = document.getElementById('att-date').value;
-  const num = state.currentAttStudent;
-  if (!date || !num) return;
   const {periods, maxP} = getEffectiveTimetable(date);
-  let attPeriods = {};
+  const periodNums = [];
+  for (let p = 1; p <= maxP; p++) { if (periods[p]) periodNums.push(p); }
+  const anyAbsent = periodNums.some(p => {
+    const chk = document.getElementById(`bulk-chk-${num}-${p}`);
+    return chk && !chk.checked;
+  });
+  const row = document.getElementById(`att-row-${num}`);
+  if (row) row.style.background = anyAbsent ? 'var(--danger-light)' : '';
+}
+
+function setRowPresent(num, present) {
+  const date = document.getElementById('att-date').value;
+  const {periods, maxP} = getEffectiveTimetable(date);
   for (let p = 1; p <= maxP; p++) {
     if (!periods[p]) continue;
-    const chk = document.getElementById(`att-chk-${p}`);
-    if (chk) attPeriods[p] = chk.checked;
+    const chk = document.getElementById(`bulk-chk-${num}-${p}`);
+    if (chk) chk.checked = present;
   }
-  const key = `${date}_${num}`;
-  state.attendance[key] = {date, studentNum: num, periods: attPeriods};
-  if (state.db) await saveToFirestore('attendance', key, state.attendance[key]);
-  updateAttStatusIndicators();
-  toast('出欠を保存しました');
+  updateRowHighlight(num);
+}
+
+function setAllPresentAll() {
+  state.students.forEach(s => setRowPresent(s.num, true));
+}
+
+async function saveBulkAttendance() {
+  const date = document.getElementById('att-date').value;
+  if (!date) { toast('日付を選択してください'); return; }
+  const {periods, maxP} = getEffectiveTimetable(date);
+  const periodNums = [];
+  for (let p = 1; p <= maxP; p++) { if (periods[p]) periodNums.push(p); }
+  if (!periodNums.length) { toast('この日の授業がありません'); return; }
+
+  const promises = [];
+  state.students.forEach(s => {
+    let attPeriods = {};
+    periodNums.forEach(p => {
+      const chk = document.getElementById(`bulk-chk-${s.num}-${p}`);
+      if (chk) attPeriods[p] = chk.checked;
+    });
+    const key = `${date}_${s.num}`;
+    state.attendance[key] = {date, studentNum: s.num, periods: attPeriods};
+    if (state.db) promises.push(saveToFirestore('attendance', key, state.attendance[key]));
+    updateRowHighlight(s.num);
+  });
+
+  await Promise.all(promises);
+  toast(`${date} の出欠を全員分保存しました`);
 }
 
 // ======== SUMMARY ========
