@@ -163,6 +163,22 @@
 
   .loading { text-align: center; padding: 40px; color: var(--text3); }
   .no-data { text-align: center; padding: 32px; color: var(--text3); font-size: 13px; }
+
+  /* Calendar */
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-dow { text-align: center; font-size: 11px; font-weight: 700; color: var(--text3); padding: 4px 0; }
+  .cal-dow.sun { color: #c0392b; }
+  .cal-dow.sat { color: var(--info); }
+  .cal-day { aspect-ratio: 1; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; cursor: pointer; border: 1px solid transparent; transition: all .1s; position: relative; }
+  .cal-day:hover { border-color: var(--accent-mid); }
+  .cal-day.empty { cursor: default; }
+  .cal-day.today { border-color: var(--accent-mid) !important; font-weight: 700; }
+  .cal-day.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .cal-day.entered { background: var(--accent); color: white; }
+  .cal-day.entered.has-absent { background: var(--warn); color: white; }
+  .cal-day.not-entered { background: var(--surface2); color: var(--text2); }
+  .cal-day.weekend { opacity: .5; }
+  .cal-day.other-month { opacity: .25; cursor: default; }
 </style>
 </head>
 <body>
@@ -319,21 +335,40 @@
 
     <!-- 出欠入力タブ -->
     <div id="tab-attendance" class="tab-panel">
-      <div class="card">
-        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-          <div class="form-group" style="margin:0">
-            <label>日付</label>
-            <input type="date" id="att-date" onchange="loadAttendanceDay()">
+      <div class="grid-2" style="align-items:start">
+        <!-- カレンダー -->
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <button class="btn btn-sm" onclick="calPrevMonth()">&#8249;</button>
+            <span id="cal-title" style="font-size:15px;font-weight:700"></span>
+            <button class="btn btn-sm" onclick="calNextMonth()">&#8250;</button>
           </div>
-          <div id="att-day-label" style="font-size:13px;color:var(--text2)"></div>
-          <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-sm" onclick="setAllPresentAll()">全員全出席</button>
-            <button class="btn btn-primary btn-sm" onclick="saveBulkAttendance()">💾 一括保存</button>
+          <div id="att-calendar"></div>
+          <div style="display:flex;gap:12px;margin-top:12px;font-size:11px;flex-wrap:wrap">
+            <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--accent);margin-right:4px;vertical-align:middle"></span>入力済み</span>
+            <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--warn-light);border:1px solid var(--warn);margin-right:4px;vertical-align:middle"></span>欠課あり</span>
+            <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);margin-right:4px;vertical-align:middle"></span>未入力</span>
           </div>
         </div>
-      </div>
-      <div class="card" style="padding:0;overflow:hidden">
-        <div id="att-bulk-table" class="no-data" style="padding:32px">日付を選択してください</div>
+        <!-- 入力エリア -->
+        <div>
+          <div class="card">
+            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+              <div class="form-group" style="margin:0">
+                <label>日付</label>
+                <input type="date" id="att-date" onchange="loadAttendanceDay()">
+              </div>
+              <div id="att-day-label" style="font-size:13px;color:var(--text2)"></div>
+              <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-sm" onclick="setAllPresentAll()">全員全出席</button>
+                <button class="btn btn-primary btn-sm" onclick="saveBulkAttendance()">💾 一括保存</button>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="padding:0;overflow:hidden">
+            <div id="att-bulk-table" class="no-data" style="padding:32px">左のカレンダーから日付を選択してください</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -494,7 +529,7 @@ function showTab(name) {
   event.target.classList.add('active');
   if (name === 'settings') { renderSubjectList(); renderTimetable(); }
   if (name === 'daychange') { renderDayChangeList(); populateSwapSubjects(); }
-  if (name === 'attendance') { renderAttStudentList(); }
+  if (name === 'attendance') { renderCalendar(); }
   if (name === 'summary') {}
 }
 
@@ -849,6 +884,7 @@ function loadAttendanceDay() {
   const dayName = ['日','月','火','水','木','金','土'][d.getDay()];
   labelEl.textContent = `（${dayName}曜日）`;
   renderBulkAttendanceTable(date);
+  renderCalendar();
 }
 
 function renderBulkAttendanceTable(date) {
@@ -962,6 +998,7 @@ async function saveBulkAttendance() {
   });
 
   await Promise.all(promises);
+  renderCalendar();
   toast(`${date} の出欠を全員分保存しました`);
 }
 
@@ -1055,6 +1092,108 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ======== CALENDAR ========
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth(); // 0-indexed
+
+function calPrevMonth() {
+  calMonth--;
+  if (calMonth < 0) { calMonth = 11; calYear--; }
+  renderCalendar();
+}
+function calNextMonth() {
+  calMonth++;
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  renderCalendar();
+}
+
+function getEnteredDates() {
+  // Returns a Set of date strings that have at least 1 attendance record
+  return new Set(Object.keys(state.attendance).map(k => k.split('_')[0]));
+}
+
+function getAbsentDates() {
+  // Returns a Set of date strings that have at least 1 absent period
+  const s = new Set();
+  Object.entries(state.attendance).forEach(([key, att]) => {
+    const date = key.split('_')[0];
+    if (Object.values(att.periods || {}).some(v => !v)) s.add(date);
+  });
+  return s;
+}
+
+function renderCalendar() {
+  const titleEl = document.getElementById('cal-title');
+  const gridEl = document.getElementById('att-calendar');
+  if (!titleEl || !gridEl) return;
+
+  titleEl.textContent = `${calYear}年${calMonth + 1}月`;
+
+  const entered = getEnteredDates();
+  const absent = getAbsentDates();
+  const today = new Date().toISOString().split('T')[0];
+  const selectedDate = document.getElementById('att-date').value;
+
+  const firstDay = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const daysInPrevMonth = new Date(calYear, calMonth, 0).getDate();
+
+  const DOWS = ['日','月','火','水','木','金','土'];
+  let html = '<div class="cal-grid">';
+  DOWS.forEach((d, i) => {
+    const cls = i === 0 ? 'sun' : i === 6 ? 'sat' : '';
+    html += `<div class="cal-dow ${cls}">${d}</div>`;
+  });
+
+  // Prev month padding
+  for (let i = 0; i < firstDay; i++) {
+    const day = daysInPrevMonth - firstDay + 1 + i;
+    html += `<div class="cal-day other-month">${day}</div>`;
+  }
+
+  // Current month days
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dow = new Date(dateStr + 'T00:00').getDay();
+    const isWeekend = dow === 0 || dow === 6;
+    const isToday = dateStr === today;
+    const isSelected = dateStr === selectedDate;
+    const isEntered = entered.has(dateStr);
+    const hasAbsent = absent.has(dateStr);
+
+    let cls = 'cal-day';
+    if (isWeekend) cls += ' weekend';
+    if (isToday) cls += ' today';
+    if (isSelected) cls += ' selected';
+    if (isEntered) cls += hasAbsent ? ' entered has-absent' : ' entered';
+    else if (!isWeekend) cls += ' not-entered';
+
+    html += `<div class="${cls}" onclick="${isWeekend ? '' : `selectCalDate('${dateStr}')`}" title="${dateStr}">${d}</div>`;
+  }
+
+  // Next month padding
+  const totalCells = firstDay + daysInMonth;
+  const remainder = totalCells % 7;
+  if (remainder > 0) {
+    for (let i = 1; i <= 7 - remainder; i++) {
+      html += `<div class="cal-day other-month">${i}</div>`;
+    }
+  }
+
+  html += '</div>';
+  gridEl.innerHTML = html;
+}
+
+function selectCalDate(dateStr) {
+  document.getElementById('att-date').value = dateStr;
+  // Sync calendar month if needed
+  const d = new Date(dateStr + 'T00:00');
+  calYear = d.getFullYear();
+  calMonth = d.getMonth();
+  loadAttendanceDay();
+  renderCalendar();
 }
 
 // ======== INIT ========
