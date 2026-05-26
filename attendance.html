@@ -177,7 +177,7 @@
   .cal-day.entered { background: var(--accent); color: white; }
   .cal-day.entered.has-absent { background: var(--warn); color: white; }
   .cal-day.not-entered { background: var(--surface2); color: var(--text2); }
-  .cal-day.weekend { opacity: .5; }
+  .cal-day.weekend { color: var(--danger); }
   .cal-day.other-month { opacity: .25; cursor: default; }
 </style>
 </head>
@@ -346,8 +346,7 @@
           <div id="att-calendar"></div>
           <div style="display:flex;gap:12px;margin-top:12px;font-size:11px;flex-wrap:wrap">
             <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--accent);margin-right:4px;vertical-align:middle"></span>入力済み</span>
-            <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--warn-light);border:1px solid var(--warn);margin-right:4px;vertical-align:middle"></span>欠課あり</span>
-            <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);margin-right:4px;vertical-align:middle"></span>未入力</span>
+<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);margin-right:4px;vertical-align:middle"></span>未入力</span>
           </div>
         </div>
         <!-- 入力エリア -->
@@ -1132,7 +1131,6 @@ function renderCalendar() {
   titleEl.textContent = `${calYear}年${calMonth + 1}月`;
 
   const entered = getEnteredDates();
-  const absent = getAbsentDates();
   const today = new Date().toISOString().split('T')[0];
   const selectedDate = document.getElementById('att-date').value;
 
@@ -1161,16 +1159,15 @@ function renderCalendar() {
     const isToday = dateStr === today;
     const isSelected = dateStr === selectedDate;
     const isEntered = entered.has(dateStr);
-    const hasAbsent = absent.has(dateStr);
 
     let cls = 'cal-day';
     if (isWeekend) cls += ' weekend';
     if (isToday) cls += ' today';
     if (isSelected) cls += ' selected';
-    if (isEntered) cls += hasAbsent ? ' entered has-absent' : ' entered';
+    if (isEntered) cls += ' entered';
     else if (!isWeekend) cls += ' not-entered';
 
-    html += `<div class="${cls}" onclick="${isWeekend ? '' : `selectCalDate('${dateStr}')`}" title="${dateStr}">${d}</div>`;
+    html += `<div class="${cls}" onclick="selectCalDate('${dateStr}')" title="${dateStr}">${d}</div>`;
   }
 
   // Next month padding
