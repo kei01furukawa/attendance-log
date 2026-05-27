@@ -1083,23 +1083,38 @@ function renderSummaryTable() {
     document.getElementById('summary-table').innerHTML = '<div class="no-data">該当データがありません</div>';
     return;
   }
-  let html = `<div class="tbl-wrap"><table class="agg-table">
-    <thead><tr><th>番号</th><th>氏名</th>`;
-  subjects.forEach(s => html += `<th style="writing-mode:vertical-rl;min-width:36px;padding:8px 4px">${s}</th>`);
-  html += `<th>合計</th></tr></thead><tbody>`;
+
+  const thBase = 'position:sticky;top:0;background:var(--surface2);z-index:3;border-bottom:2px solid var(--border2);white-space:nowrap;padding:8px 10px;text-align:left;font-weight:600;color:var(--text2);';
+  const thNum  = thBase + 'left:0;z-index:4;min-width:48px;';
+  const thName = thBase + 'left:48px;z-index:4;min-width:120px;box-shadow:2px 0 4px rgba(0,0,0,.06);';
+  const thSubj = thBase + 'writing-mode:vertical-rl;min-width:36px;padding:8px 4px;text-align:center;';
+  const thTot  = thBase + 'min-width:48px;text-align:center;';
+
+  let html = '<div style="overflow:auto;max-height:600px;border-radius:var(--radius)">'
+    + '<table class="agg-table" style="border-collapse:collapse;width:100%">'
+    + '<thead><tr>'
+    + '<th style="' + thNum + '">番号</th>'
+    + '<th style="' + thName + '">氏名</th>';
+  subjects.forEach(s => { html += '<th style="' + thSubj + '">' + s + '</th>'; });
+  html += '<th style="' + thTot + '">合計</th></tr></thead><tbody>';
+
+  const tdNum  = 'position:sticky;left:0;background:var(--surface);z-index:1;color:var(--text3);padding:8px 10px;border-bottom:1px solid var(--border);';
+  const tdName = 'position:sticky;left:48px;background:var(--surface);z-index:1;font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);box-shadow:2px 0 4px rgba(0,0,0,.06);white-space:nowrap;';
 
   state.students.forEach(s => {
     const r = result[s.num];
     if (!r) return;
     const total = Object.values(r.counts).reduce((a,b) => a+b, 0);
-    html += `<tr><td style="color:var(--text3)">${s.num}</td><td style="font-weight:500">${s.name}</td>`;
+    html += '<tr>'
+      + '<td style="' + tdNum + '">' + s.num + '</td>'
+      + '<td style="' + tdName + '">' + s.name + '</td>';
     subjects.forEach(sub => {
       const cnt = r.counts[sub] || 0;
       const cls = cnt === 0 ? 'zero' : cnt >= 10 ? 'danger' : cnt >= 5 ? 'warn' : '';
-      html += `<td class="agg-count ${cls}">${cnt || '–'}</td>`;
+      html += '<td class="agg-count ' + cls + '" style="padding:8px 4px;border-bottom:1px solid var(--border)">' + (cnt || '–') + '</td>';
     });
     const tcls = total === 0 ? 'zero' : total >= 20 ? 'danger' : total >= 10 ? 'warn' : '';
-    html += `<td class="agg-count ${tcls}" style="font-weight:700">${total || '–'}</td></tr>`;
+    html += '<td class="agg-count ' + tcls + '" style="font-weight:700;padding:8px 10px;border-bottom:1px solid var(--border)">' + (total || '–') + '</td></tr>';
   });
   html += '</tbody></table></div>';
   document.getElementById('summary-table').innerHTML = html;
