@@ -7,6 +7,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root {
     --bg: #f5f4f0;
@@ -373,23 +375,59 @@
 
     <!-- 集計・出力タブ -->
     <div id="tab-summary" class="tab-panel">
-      <div class="card">
-        <div class="card-title">集計条件</div>
-        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-          <div class="form-group" style="margin:0">
-            <label>開始日</label>
-            <input type="date" id="sum-from">
+      <!-- サブタブ -->
+      <div style="display:flex;gap:2px;margin-bottom:16px;border-bottom:2px solid var(--border);padding-bottom:0">
+        <button id="subtab-btn-agg" onclick="showSubTab('agg')" style="padding:8px 20px;border:none;background:none;font-size:13px;font-weight:600;color:var(--accent);border-bottom:2px solid var(--accent);margin-bottom:-2px;cursor:pointer">一覧集計</button>
+        <button id="subtab-btn-detail" onclick="showSubTab('detail')" style="padding:8px 20px;border:none;background:none;font-size:13px;font-weight:500;color:var(--text2);border-bottom:2px solid transparent;margin-bottom:-2px;cursor:pointer">生徒別欠課明細</button>
+      </div>
+
+      <!-- 一覧集計 -->
+      <div id="subtab-agg">
+        <div class="card">
+          <div class="card-title">集計条件</div>
+          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="margin:0">
+              <label>開始日</label>
+              <input type="date" id="sum-from">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>終了日</label>
+              <input type="date" id="sum-to">
+            </div>
+            <button class="btn btn-primary" onclick="calcSummary()">集計する</button>
+            <button class="btn" onclick="exportExcel()">Excelで出力</button>
           </div>
-          <div class="form-group" style="margin:0">
-            <label>終了日</label>
-            <input type="date" id="sum-to">
-          </div>
-          <button class="btn btn-primary" onclick="calcSummary()">集計する</button>
-          <button class="btn" onclick="exportExcel()">Excelで出力</button>
+        </div>
+        <div class="card">
+          <div id="summary-table" class="no-data">集計を実行してください</div>
         </div>
       </div>
-      <div class="card">
-        <div id="summary-table" class="no-data">集計を実行してください</div>
+
+      <!-- 生徒別欠課明細 -->
+      <div id="subtab-detail" style="display:none">
+        <div class="card">
+          <div class="card-title">検索条件</div>
+          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="margin:0">
+              <label>生徒</label>
+              <select id="det-student" style="min-width:160px">
+                <option value="">生徒を選択...</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>開始日</label>
+              <input type="date" id="det-from">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>終了日</label>
+              <input type="date" id="det-to">
+            </div>
+            <button class="btn btn-primary" onclick="calcDetail()">表示</button>
+            <button class="btn" onclick="exportDetailExcel()"><span style="font-size:12px">📊</span> Excel出力</button>
+            <button class="btn" onclick="exportDetailPDF()"><span style="font-size:12px">📄</span> PDF出力</button>
+          </div>
+        </div>
+        <div id="det-result"></div>
       </div>
     </div>
   </main>
@@ -1085,6 +1123,243 @@ function exportExcel() {
   XLSX.writeFile(wb, `欠課集計_${from}_${to}.xlsx`);
 }
 
+// ======== SUBTAB ========
+function showSubTab(name) {
+  document.getElementById('subtab-agg').style.display = name === 'agg' ? '' : 'none';
+  document.getElementById('subtab-detail').style.display = name === 'detail' ? '' : 'none';
+  const aggBtn = document.getElementById('subtab-btn-agg');
+  const detBtn = document.getElementById('subtab-btn-detail');
+  if (name === 'agg') {
+    aggBtn.style.color = 'var(--accent)'; aggBtn.style.borderBottomColor = 'var(--accent)'; aggBtn.style.fontWeight = '600';
+    detBtn.style.color = 'var(--text2)'; detBtn.style.borderBottomColor = 'transparent'; detBtn.style.fontWeight = '500';
+  } else {
+    detBtn.style.color = 'var(--accent)'; detBtn.style.borderBottomColor = 'var(--accent)'; detBtn.style.fontWeight = '600';
+    aggBtn.style.color = 'var(--text2)'; aggBtn.style.borderBottomColor = 'transparent'; aggBtn.style.fontWeight = '500';
+    populateDetailStudents();
+  }
+}
+
+function populateDetailStudents() {
+  const sel = document.getElementById('det-student');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">生徒を選択...</option>' +
+    state.students.map(s => `<option value="${s.num}" ${String(s.num)===cur?'selected':''}>${s.num}. ${s.name}</option>`).join('');
+}
+
+// ======== DETAIL ========
+function getDayChangeDesc(dateStr) {
+  const changes = state.dayChanges[dateStr] || [];
+  if (!changes.length) return '';
+  return changes.map(c => {
+    if (c.type === 'day') return `${DAYS[c.dayIdx]}曜日課`;
+    if (c.type === 'cut') return `${c.fromPeriod}限以降カット`;
+    if (c.type === 'swap') return `${c.period}限→${c.subject}`;
+    if (c.type === 'test') return `テスト日`;
+    return '';
+  }).filter(Boolean).join('／');
+}
+
+function calcDetailData(num, from, to) {
+  // Returns { subject: [{date, period, changeDesc}] }
+  const result = {};
+  Object.entries(state.attendance).forEach(([key, att]) => {
+    const [date, numStr] = key.split('_');
+    if (parseInt(numStr) !== num) return;
+    if (date < from || date > to) return;
+    const {periods} = getEffectiveTimetable(date);
+    Object.entries(att.periods || {}).forEach(([p, present]) => {
+      if (present) return;
+      const sub = periods[parseInt(p)];
+      if (!sub) return;
+      if (!result[sub]) result[sub] = [];
+      result[sub].push({date, period: parseInt(p), changeDesc: getDayChangeDesc(date)});
+    });
+  });
+  // Sort entries by date then period
+  Object.values(result).forEach(arr => arr.sort((a,b) => a.date.localeCompare(b.date) || a.period - b.period));
+  return result;
+}
+
+function formatDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00');
+  const dow = ['日','月','火','水','木','金','土'][d.getDay()];
+  return `${d.getMonth()+1}/${d.getDate()}（${dow}）`;
+}
+
+function calcDetail() {
+  const num = parseInt(document.getElementById('det-student').value);
+  const from = document.getElementById('det-from').value;
+  const to = document.getElementById('det-to').value;
+  if (!num) { toast('生徒を選択してください'); return; }
+  if (!from || !to) { toast('期間を指定してください'); return; }
+
+  const student = state.students.find(s => s.num === num);
+  const data = calcDetailData(num, from, to);
+  const subjects = Object.keys(data).sort();
+  const el = document.getElementById('det-result');
+
+  if (!subjects.length) {
+    el.innerHTML = '<div class="card"><div class="no-data">欠課データがありません</div></div>';
+    return;
+  }
+
+  let html = `<div class="card" style="margin-bottom:8px">
+    <div style="font-size:15px;font-weight:700">${student.num}. ${student.name} 　欠課明細</div>
+    <div style="font-size:12px;color:var(--text2);margin-top:4px">${from} 〜 ${to}</div>
+  </div>`;
+
+  subjects.forEach(sub => {
+    const entries = data[sub];
+    html += `<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:14px;font-weight:700">${sub}</span>
+        <span class="pill ${entries.length>=10?'pill-danger':entries.length>=5?'pill-warn':'pill-accent'}">${entries.length}時限</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">日付</th>
+          <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border);width:60px">時限</th>
+          <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">日課変更</th>
+        </tr></thead><tbody>`;
+    entries.forEach(e => {
+      html += `<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border)">${formatDate(e.date)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:center">${e.period}限</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2)">${e.changeDesc || '－'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  });
+
+  // 合計サマリ
+  const total = Object.values(data).reduce((a,b) => a+b.length, 0);
+  html += `<div class="card" style="background:var(--surface2)">
+    <div style="font-size:13px;font-weight:700">合計欠課時数：${total}時限</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+      ${subjects.map(s => `<span class="pill pill-gray">${s}：${data[s].length}</span>`).join('')}
+    </div>
+  </div>`;
+
+  el.innerHTML = html;
+  state.detailData = {student, data, subjects, from, to};
+}
+
+function exportDetailExcel() {
+  if (!state.detailData) { toast('先に表示を実行してください'); return; }
+  const {student, data, subjects, from, to} = state.detailData;
+  const wb = XLSX.utils.book_new();
+
+  subjects.forEach(sub => {
+    const entries = data[sub];
+    const rows = [['日付', '曜日', '時限', '日課変更']];
+    entries.forEach(e => {
+      const d = new Date(e.date + 'T00:00');
+      const dow = ['日','月','火','水','木','金','土'][d.getDay()];
+      rows.push([`${d.getMonth()+1}/${d.getDate()}`, dow, `${e.period}限`, e.changeDesc || '']);
+    });
+    rows.push([]);
+    rows.push(['合計', '', `${entries.length}時限`, '']);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{wch:10},{wch:6},{wch:6},{wch:20}];
+    const sheetName = sub.slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  // Summary sheet
+  const sumRows = [['科目', '欠課時数']];
+  subjects.forEach(s => sumRows.push([s, data[s].length]));
+  sumRows.push(['合計', Object.values(data).reduce((a,b) => a+b.length, 0)]);
+  const sumWs = XLSX.utils.aoa_to_sheet(sumRows);
+  sumWs['!cols'] = [{wch:20},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, sumWs, '科目別サマリ');
+
+  XLSX.writeFile(wb, `欠課明細_${student.num}_${student.name}_${from}_${to}.xlsx`);
+}
+
+function exportDetailPDF() {
+  if (!state.detailData) { toast('先に表示を実行してください'); return; }
+  const {student, data, subjects, from, to} = state.detailData;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  const pageW = 210;
+  const margin = 15;
+  let y = 20;
+
+  // Title
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Absence Detail Report`, margin, y);
+  y += 7;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Student: No.${student.num}  ${student.name.length <= 20 ? student.name : student.name.slice(0,20)+'...'}`, margin, y);
+  y += 5;
+  doc.text(`Period: ${from} - ${to}`, margin, y);
+  y += 10;
+
+  subjects.forEach(sub => {
+    const entries = data[sub];
+    if (y > 260) { doc.addPage(); y = 20; }
+
+    // Subject header
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    const subLabel = sub + `  (${entries.length} periods absent)`;
+    doc.text(subLabel, margin, y);
+    y += 2;
+    doc.setDrawColor(180,180,180);
+    doc.line(margin, y, pageW - margin, y);
+    y += 5;
+
+    // Table
+    const tableData = entries.map(e => {
+      const d = new Date(e.date + 'T00:00');
+      const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+      return [
+        `${d.getMonth()+1}/${d.getDate()} (${dow})`,
+        `${e.period}`,
+        e.changeDesc || '-'
+      ];
+    });
+
+    doc.autoTable({
+      startY: y,
+      head: [['Date', 'Period', 'Schedule Change']],
+      body: tableData,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [15, 110, 86], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 244, 240] },
+      columnStyles: { 0: {cellWidth: 40}, 1: {cellWidth: 18, halign:'center'}, 2: {cellWidth: 'auto'} },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  });
+
+  // Summary at end
+  if (y > 240) { doc.addPage(); y = 20; }
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Summary', margin, y);
+  y += 2;
+  doc.line(margin, y, pageW - margin, y);
+  y += 4;
+  const total = Object.values(data).reduce((a,b) => a+b.length, 0);
+  const sumData = subjects.map(s => [s, String(data[s].length)]);
+  sumData.push(['Total', String(total)]);
+  doc.autoTable({
+    startY: y,
+    head: [['Subject', 'Absent Periods']],
+    body: sumData,
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 9, cellPadding: 2 },
+    headStyles: { fillColor: [15, 110, 86], textColor: 255 },
+    columnStyles: { 0: {cellWidth: 80}, 1: {cellWidth: 30, halign:'center'} },
+  });
+
+  doc.save(`欠課明細_${student.num}_${student.name}_${from}_${to}.pdf`);
+}
+
 // ======== TOAST ========
 function toast(msg) {
   const el = document.getElementById('toast');
@@ -1205,6 +1480,8 @@ async function init() {
   document.getElementById('dc-date').value = today;
   document.getElementById('sum-from').value = today.slice(0,7) + '-01';
   document.getElementById('sum-to').value = today;
+  document.getElementById('det-from').value = today.slice(0,7) + '-01';
+  document.getElementById('det-to').value = today;
 
   // Restore Firebase — await so Firestore data loads before rendering
   const savedCfg = localStorage.getItem('fbConfig');
